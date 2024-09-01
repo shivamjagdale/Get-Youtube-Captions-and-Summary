@@ -50,3 +50,19 @@ if st.button("Get Captions and Summary"):
             st.write(summary)
     else:
         st.warning("Please enter a YouTube video URL")
+
+
+import logging
+
+def get_captions(video_url):
+    video_id = extract_video_id(video_url)
+    if not video_id:
+        return "Invalid YouTube URL"
+
+    try:
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        captions = " ".join([entry['text'] for entry in transcript])
+        return captions
+    except Exception as e:
+        logging.error(f"Error fetching transcript: {str(e)}")
+        return f"Error: {str(e)}"
