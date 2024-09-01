@@ -1,18 +1,14 @@
 import streamlit as st
-from googleapiclient.discovery import build
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.exceptions import TranscriptsDisabled, NoTranscriptFound
 import google.generativeai as genai
 import re
-from functools import lru_cache
 
-# Set your API keys here
+# Set your API key here
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-YOUTUBE_API_KEY = st.secrets["YOUTUBE_API_KEY"]  # Add this to your Streamlit secrets
 
 # Configure the Gemini API
 genai.configure(api_key=GOOGLE_API_KEY)
-
-# Create YouTube API client
-youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
 
 def extract_video_id(url):
     video_id_match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", url)
@@ -20,30 +16,21 @@ def extract_video_id(url):
         return video_id_match.group(1)
     return None
 
-@lru_cache(maxsize=100)
-def get_captions(video_id):
+def get_captions(video_url):
+    video_id = extract_video_id(video_url)
+    if not video_id:
+        return "Invalid YouTube URL"
+
     try:
-        captions = youtube.captions().list(
-            part='snippet',
-            videoId=video_id
-        ).execute()
-
-        if not captions['items']:
-            return "No captions available for this video."
-
-        caption_id = captions['items'][0]['id']
-        subtitle = youtube.captions().download(
-            id=caption_id,
-            tfmt='srt'
-        ).execute()
-
-        # Process the SRT format to extract text
-        lines = subtitle.decode('utf-8').split('\n')
-        text_lines = [line for line in lines if not line.strip().isdigit() and not '-->' in line]
-        return ' '.join(text_lines)
-
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        captions = " ".join([entry['text'] for entry in transcript])
+        return captions
+    except TranscriptsDisabled:
+        return "Error: Transcripts are disabled for this video."
+    except NoTranscriptFound:
+        return "Error: No transcript found for this video."
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Error: An unexpected error occurred: {str(e)}"
 
 def summarize_text(text):
     model = genai.GenerativeModel('gemini-pro')
@@ -59,16 +46,14 @@ video_url = st.text_input("YouTube video URL")
 
 if st.button("Get Captions and Summary"):
     if video_url:
-        video_id = extract_video_id(video_url)
-        if video_id:
-            captions = get_captions(video_id)
-            st.text_area("Captions:", value=captions, height=200)
+        captions = get_captions(video_url)
+        st.text_area("Captions:", value=captions, height=200)
 
-            if not captions.startswith("Error") and not captions.startswith("No captions"):
-                summary = summarize_text(captions)
-                st.subheader("Here's the summary of the video:")
-                st.write(summary)
+        if not captions.startswith("Error"):
+            summary = summarize_text(captions)
+            st.subheader("Here's the summary of the video:")
+            st.write(summary)
         else:
-            st.warning("Invalid YouTube URL")
+            st.error(captions)
     else:
         st.warning("Please enter a YouTube video URL")
